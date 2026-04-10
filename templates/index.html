@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forensic Camera Identifier</title>
+    <meta name="description" content="Upload an image to identify the originating camera model using a trained EfficientNet-B0 model.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="page-wrap">
+        <div class="glass-container">
+            <div class="header">
+                <h1>Forensic Camera Identifier</h1>
+                <p>Upload an image to detect its originating camera model using AI.</p>
+            </div>
+
+            <!-- Drop Zone -->
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-zone__icon">📷</div>
+                <span class="drop-zone__title">Drag & Drop your image here</span>
+                <span class="drop-zone__sub">or click to browse — JPG, PNG, TIFF supported</span>
+                <input type="file" name="image" id="fileInput" accept="image/*">
+            </div>
+
+            <!-- Preview strip -->
+            <div id="previewWrap" style="display:none;" class="preview-wrap">
+                <img id="previewImg" class="preview-img" src="" alt="Preview">
+                <span id="previewName" class="preview-name"></span>
+            </div>
+
+            <!-- Loading spinner -->
+            <div id="loaderWrap" style="display:none;" class="loader-wrap">
+                <div class="loader"></div>
+                <span>Analyzing image patches…</span>
+            </div>
+
+            <!-- Results -->
+            <div id="resultCard" style="display:none;" class="result-card">
+                <div class="result-header">
+                    <span class="result-label">Predicted Camera</span>
+                    <span id="predClass" class="result-class"></span>
+                </div>
+                <div class="result-meta">
+                    <div class="meta-chip">
+                        <span class="meta-label">Confidence</span>
+                        <span id="predConf" class="meta-value"></span>
+                    </div>
+                    <div class="meta-chip">
+                        <span class="meta-label">Patches Used</span>
+                        <span id="predPatches" class="meta-value"></span>
+                    </div>
+                    <div class="meta-chip" id="fallbackChip" style="display:none;">
+                        <span class="meta-label" style="color:#facc15;">⚠ Fallback Mode</span>
+                        <span class="meta-value" style="color:#facc15; font-size:0.75rem;">High-variance image</span>
+                    </div>
+                </div>
+
+                <!-- Bar chart for class scores -->
+                <div class="scores-section">
+                    <p class="scores-title">Confidence Breakdown</p>
+                    <div id="scoresChart" class="scores-chart"></div>
+                </div>
+
+                <button id="resetBtn" class="primary-btn">Test Another Image</button>
+            </div>
+
+            <!-- Error card -->
+            <div id="errorCard" style="display:none;" class="error-card">
+                <span class="error-icon">⚠️</span>
+                <p id="errorMsg"></p>
+                <button id="errorResetBtn" class="primary-btn">Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone       = document.getElementById("dropZone");
+        const fileInput      = document.getElementById("fileInput");
+        const previewWrap    = document.getElementById("previewWrap");
+        const previewImg     = document.getElementById("previewImg");
+        const previewName    = document.getElementById("previewName");
+        const loaderWrap     = document.getElementById("loaderWrap");
+        const resultCard     = document.getElementById("resultCard");
+        const errorCard      = document.getElementById("errorCard");
+        const resetBtn       = document.getElementById("resetBtn");
+        const errorResetBtn  = document.getElementById("errorResetBtn");
+
+        // ── Drag & Drop ──
+        dropZone.addEventListener("click", () => fileInput.click());
+
+        dropZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            dropZone.classList.add("drop-zone--over");
+        });
+        ["dragleave", "dragend"].forEach(evt =>
+            dropZone.addEventListener(evt, () => dropZone.classList.remove("drop-zone--over"))
+        );
+        dropZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            dropZone.classList.remove("drop-zone--over");
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener("change", () => {
+            if (fileInput.files.length) handleFile(fileInput.files[0]);
+        });
+
+        // ── Reset ──
+        [resetBtn, errorResetBtn].forEach(btn => btn.addEventListener("click", resetUI));
+        function resetUI() {
+            fileInput.value = "";
+            dropZone.style.display = "flex";
+            previewWrap.style.display = "none";
+            loaderWrap.style.display = "none";
+            resultCard.style.display = "none";
+            errorCard.style.display = "none";
+        }
+
+        // ── Handle File ──
+        function handleFile(file) {
+            // Show preview
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImg.src = e.target.result;
+                previewName.textContent = file.name;
+                previewWrap.style.display = "flex";
+            };
+            reader.readAsDataURL(file);
+
+            // Switch to loading state
+            dropZone.style.display = "none";
+            resultCard.style.display = "none";
+            errorCard.style.display = "none";
+            loaderWrap.style.display = "flex";
+
+            // POST to backend
+            const formData = new FormData();
+            formData.append("image", file);
+
+            fetch("/predict", { method: "POST", body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    loaderWrap.style.display = "none";
+                    if (data.error) {
+                        document.getElementById("errorMsg").textContent = data.error;
+                        errorCard.style.display = "flex";
+                    } else {
+                        showResult(data);
+                    }
+                })
+                .catch(() => {
+                    loaderWrap.style.display = "none";
+                    document.getElementById("errorMsg").textContent = "Network error — make sure the server is running.";
+                    errorCard.style.display = "flex";
+                });
+        }
+
+        // ── Show Result ──
+        function showResult(data) {
+            document.getElementById("predClass").textContent   = data.predicted_class;
+            document.getElementById("predConf").textContent    = data.confidence;
+            document.getElementById("predPatches").textContent = data.patches_processed;
+
+            document.getElementById("fallbackChip").style.display = data.used_fallback ? "flex" : "none";
+
+            // Build bar chart
+            const chart = document.getElementById("scoresChart");
+            chart.innerHTML = "";
+            const scores = data.class_scores;
+            const entries = Object.entries(scores).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
+            entries.forEach(([cls, pct]) => {
+                const val = parseFloat(pct);
+                const isTop = cls === data.predicted_class;
+                const row = document.createElement("div");
+                row.className = "score-row" + (isTop ? " score-row--top" : "");
+                row.innerHTML = `
+                    <span class="score-label">${cls}</span>
+                    <div class="score-bar-bg">
+                        <div class="score-bar" style="width:${val}%; background: ${isTop ? 'linear-gradient(90deg,#3b82f6,#8b5cf6)' : 'rgba(255,255,255,0.15)'}"></div>
+                    </div>
+                    <span class="score-pct">${pct}</span>`;
+                chart.appendChild(row);
+            });
+
+            resultCard.style.display = "flex";
+        }
+    </script>
+</body>
+</html>

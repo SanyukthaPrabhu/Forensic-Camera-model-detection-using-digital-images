@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.venv/
+venv/
+
+# Model weights (too large for git)
+*.pth
+*.pt
+checkpoint/
+
+# Dataset images (too large for git)
+HTC-1-M7/
+LG-Nexus-5x/
+Motorola-Droid-Maxx/
+Motorola-Nexus-6/
+Motorola-X/
+Samsung-Galaxy-Note3/
+Samsung-Galaxy-S4/
+Sony-NEX-7/
+iPhone-4s/
+iPhone-6/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
