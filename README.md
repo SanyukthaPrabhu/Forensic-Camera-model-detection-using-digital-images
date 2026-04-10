@@ -32,3 +32,36 @@ This document contains the training details and accuracy metrics resulting from 
 > **Best Validation Accuracy:** 64.52%
 
 The best performing model's weights have been saved under `best_model.pth`. Furthermore, the full states for each epoch are stored in the `./checkpoint/` directory as `checkpoint_epoch_{X}.pth`.
+
+---
+
+## Phase 2: Fine-Tuning Results
+
+To significantly improve accuracy and test on completely unseen data variations, a second training phase was conducted using 1,750 completely unused images strictly separated from the first phase. The deeper EfficientNet backbone layers (`features[7]` and `features[8]`) were unfrozen.
+
+### Dataset & Processing Stats (Fine-Tuning)
+- **Train Set Patches Extracted:** 6,924 patches (Time taken: ~332.71s)
+- **Validation Set Patches Extracted:** 1,740 patches (Time taken: ~105.61s)
+- **Model Adjustments:** `features[7]`, `features[8]`, and `classifier` layers un-frozen for fine-tuning.
+
+### Training Configuration
+- **Optimizer:** Adam (Learning Rate: 1e-4)
+- **Scheduler:** StepLR (Step size: 2, Gamma: 0.5)
+- **Batch Size:** 32
+- **Epochs:** 5
+
+### Epoch Results
+
+| Epoch | Train Loss | Train Accuracy | Validation Loss | Validation Accuracy | Time Taken |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **1/5** | 1.1060 | 62.81% | 0.8974 | 71.49% | 437.67s |
+| **2/5** | 0.8878 | 70.74% | 0.8118 | 73.74% | 410.05s |
+| **3/5** | 0.7775 | 74.03% | 0.7273 | 76.61% | 398.18s |
+| **4/5** | 0.7130 | 76.73% | 0.7295 | 75.98% | 417.38s |
+| **5/5** | 0.6840 | 77.51% | 0.7090 | 77.07% | 408.19s |
+
+<br/>
+
+> **Best Validation Accuracy (Phase 2):** 77.07%
+
+The significantly improved fine-tuned model weights are saved as `best_model_finetuned.pth`, with checkpoints stored in `./checkpoint_finetune/`.
