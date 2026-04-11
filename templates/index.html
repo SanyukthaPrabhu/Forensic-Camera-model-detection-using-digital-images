@@ -39,12 +39,23 @@
             <!-- Results -->
             <div id="resultCard" style="display:none;" class="result-card">
                 <div class="result-header">
-                    <span class="result-label">Predicted Camera</span>
-                    <span id="predClass" class="result-class"></span>
+                    <span class="result-label">Authenticity Prediction</span>
+                    <span id="predAuth" class="result-class authenticity-class"></span>
+                    <span id="predDeepfakeType" style="display:none; color:#facc15; font-size:1rem; margin-top:4px;"></span>
+                    <div id="heatmapWrap" style="display:none; margin-top: 16px; text-align: center; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 8px;">
+                        <span class="result-label" style="display:block; margin-bottom: 8px; color: #facc15;">Grad-CAM Deepfake Evidence</span>
+                        <img id="heatmapImg" src="" style="width: 200px; max-width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                    </div>
+                    <span class="result-label" style="margin-top: 16px;">Camera Match</span>
+                    <span id="predClass" class="result-class" style="font-size: 1.4rem;"></span>
                 </div>
                 <div class="result-meta">
                     <div class="meta-chip">
-                        <span class="meta-label">Confidence</span>
+                        <span class="meta-label">Auth. Confidence</span>
+                        <span id="predAuthConf" class="meta-value"></span>
+                    </div>
+                    <div class="meta-chip">
+                        <span class="meta-label">Cam. Confidence</span>
                         <span id="predConf" class="meta-value"></span>
                     </div>
                     <div class="meta-chip">
@@ -156,8 +167,40 @@
                 });
         }
 
-        // ── Show Result ──
         function showResult(data) {
+            const predAuthEl = document.getElementById("predAuth");
+            const predDeepfakeTypeEl = document.getElementById("predDeepfakeType");
+            const heatmapWrap = document.getElementById("heatmapWrap");
+            const heatmapImg = document.getElementById("heatmapImg");
+            
+            predAuthEl.textContent = data.authenticity;
+            if (data.authenticity === "FAKE") {
+                predAuthEl.style.background = "linear-gradient(90deg, #ef4444, #f97316)";
+                predAuthEl.style.webkitBackgroundClip = "text";
+                predAuthEl.style.webkitTextFillColor = "transparent";
+                
+                if (data.deepfake_type) {
+                    predDeepfakeTypeEl.textContent = "Method: " + data.deepfake_type;
+                    predDeepfakeTypeEl.style.display = "block";
+                } else {
+                    predDeepfakeTypeEl.style.display = "none";
+                }
+
+                if (data.heatmap_base64) {
+                    heatmapImg.src = "data:image/jpeg;base64," + data.heatmap_base64;
+                    heatmapWrap.style.display = "block";
+                } else {
+                    heatmapWrap.style.display = "none";
+                }
+            } else {
+                predAuthEl.style.background = "linear-gradient(90deg, #34d399, #10b981)";
+                predAuthEl.style.webkitBackgroundClip = "text";
+                predAuthEl.style.webkitTextFillColor = "transparent";
+                predDeepfakeTypeEl.style.display = "none";
+                heatmapWrap.style.display = "none";
+            }
+
+            document.getElementById("predAuthConf").textContent = data.authenticity_confidence;
             document.getElementById("predClass").textContent   = data.predicted_class;
             document.getElementById("predConf").textContent    = data.confidence;
             document.getElementById("predPatches").textContent = data.patches_processed;

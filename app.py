@@ -6,11 +6,16 @@ from PIL import Image
 import numpy as np
 from collections import Counter
 from flask import Flask, request, jsonify, render_template
+from facenet_pytorch import MTCNN
+import base64
+import cv2
+from grad_cam import GradCAM, overlay_heatmap
 
 app = Flask(__name__)
 
 # Config
-BEST_MODEL_PATH = 'best_model.pth'
+BEST_MODEL_PATH = 'best_model_finetuned.pth'
+REAL_FAKE_MODEL_PATH = 'best_real_fake_model.pth'
 NUM_CLASSES = 10
 PATCH_SIZE = 224
 MAX_PATCHES_PER_IMAGE = 10
@@ -37,6 +42,32 @@ else:
     print("WARNING: best_model.pth not found — using random weights!")
 model = model.to(DEVICE)
 model.eval()
+
+MULTICLASS_MODEL_PATH = 'best_multiclass_model.pth'
+MULTICLASS_CLASSES = ['Deepfakes', 'Face2Face', 'FaceShifter', 'FaceSwap', 'NeuralTextures', 'Original']
+
+# Load Multiclass model
+print(f"Loading Multiclass model on {DEVICE}...")
+multiclass_model = models.efficientnet_b0()
+num_ftrs = multiclass_model.classifier[1].in_features
+multiclass_model.classifier = nn.Sequential(
+    nn.Dropout(p=0.4, inplace=True),
+    nn.Linear(num_ftrs, 6)
+)
+if os.path.exists(MULTICLASS_MODEL_PATH):
+    multiclass_model.load_state_dict(torch.load(MULTICLASS_MODEL_PATH, map_location=DEVICE))
+    print("best_multiclass_model.pth loaded successfully.")
+else:
+    print("WARNING: best_multiclass_model.pth not found — using random weights!")
+multiclass_model = multiclass_model.to(DEVICE)
+multiclass_model.eval()
+
+# Initialize Grad-CAM
+grad_cam = GradCAM(multiclass_model, multiclass_model.features[-1])
+
+# Init Face Detector
+print("Initializing MTCNN Face Detector...")
+mtcnn = MTCNN(image_size=224, margin=30, keep_all=False, post_process=False, device=DEVICE)
 
 transform = transforms.Compose([
     transforms.ToTensor(),
@@ -94,10 +125,46 @@ def predict():
 
         with torch.no_grad():
             X_tensor = torch.stack(patches_list).to(DEVICE)
+            
+            # Camera Identification
             outputs = model(X_tensor)
             probs = torch.nn.functional.softmax(outputs, dim=1)
             _, preds = torch.max(outputs, 1)
             preds_list = preds.cpu().numpy().tolist()
+            
+        # --- Live Face Extraction for Multiclass inference ---
+        face_tensor = mtcnn(img)
+        rf_confidence = 0.0
+        authenticity_label = "NO FACE DETECTED"
+        deepfake_type = None
+        heatmap_base64 = None
+
+        if face_tensor is not None:
+            # MTCNN yields 0-255 uint8 tensor. Normalize it using standard pipeline
+            face_img_pil = transforms.ToPILImage()(face_tensor.byte())
+            face_input = transform(face_img_pil).unsqueeze(0).to(DEVICE)
+            face_input.requires_grad = True
+            
+            mc_output = multiclass_model(face_input)
+            mc_probs = torch.nn.functional.softmax(mc_output, dim=1)[0]
+            max_prob, predicted_idx = torch.max(mc_probs, 0)
+            
+            predicted_type = MULTICLASS_CLASSES[predicted_idx.item()]
+            rf_confidence = float(max_prob.cpu().item())
+            
+            if predicted_type == 'Original':
+                authenticity_label = "REAL"
+            else:
+                authenticity_label = "FAKE"
+                deepfake_type = predicted_type
+                
+                try:
+                    heatmap = grad_cam.generate_heatmap(face_input, predicted_idx.item())
+                    overlay = overlay_heatmap(face_img_pil, heatmap)
+                    _, buffer = cv2.imencode('.jpg', overlay)
+                    heatmap_base64 = base64.b64encode(buffer).decode('utf-8')
+                except Exception as ex:
+                    print(f"Heatmap error: {ex}")
 
         # Image-level: majority vote across patches
         majority_vote = Counter(preds_list).most_common(1)[0][0]
@@ -110,6 +177,10 @@ def predict():
         return jsonify({
             'predicted_class': predicted_class,
             'confidence': f"{confidence * 100:.2f}%",
+            'authenticity': authenticity_label,
+            'deepfake_type': deepfake_type,
+            'heatmap_base64': heatmap_base64,
+            'authenticity_confidence': f"{rf_confidence * 100:.2f}%",
             'patches_processed': patches_extracted,
             'used_fallback': used_fallback,
             'class_scores': class_scores
